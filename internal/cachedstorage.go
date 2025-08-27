@@ -19,7 +19,8 @@ func (s *cachedStorage[T]) Start(ctx context.Context, trash storage.Trash[T]) {
 				units := toUnits(in)
 				s.units.Set(units)
 				s.newLength <- l + len(in)
-				s.cold.Set(asReadOnlyUnits(units))
+				err := s.cold.Set(asReadOnlyUnits(units))
+				s.writeSyncChan <- err
 				for _, u := range units {
 					u.SetPersisted()
 				}
@@ -44,6 +45,18 @@ func (s *cachedStorage[T]) Start(ctx context.Context, trash storage.Trash[T]) {
 	}()
 }
 
+func (s *cachedStorage[T]) Sync() chan error {
+	result := make(chan error)
+	go func() {
+		select {
+		case err := <-s.writeSyncChan:
+			result <- err
+		case <-s.ctx.Done():
+			result <- s.ctx.Err()
+		}
+	}()
+	return result
+}
 func (s *cachedStorage[T]) Set(values []T) {
 	var toCache []persistable[T]
 	for _, v := range values {
@@ -104,22 +117,24 @@ func (s *cachedStorage[T]) evict(amount int) []T {
 }
 
 type cachedStorage[T storage.Indexable] struct {
-	units     listop.IndexedList[*unit[T]]
-	cold      storage.ColdStorage[T]
-	maxUnits  int
-	ctx       context.Context
-	toCache   chan []persistable[T]
-	newLength chan int
+	units         listop.IndexedList[*unit[T]]
+	cold          storage.ColdStorage[T]
+	maxUnits      int
+	ctx           context.Context
+	toCache       chan []persistable[T]
+	newLength     chan int
+	writeSyncChan chan error // emits when a write operation completes
 }
 
 func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], trash storage.Trash[T], maxUnits int) storage.CachedStorage[T] {
 	cache := &cachedStorage[T]{
-		units:     listop.NewIndexedList[*unit[T]](),
-		cold:      cold,
-		maxUnits:  maxUnits,
-		ctx:       ctx,
-		toCache:   make(chan []persistable[T], 100),
-		newLength: make(chan int, 100),
+		units:         listop.NewIndexedList[*unit[T]](),
+		cold:          cold,
+		maxUnits:      maxUnits,
+		ctx:           ctx,
+		toCache:       make(chan []persistable[T], 100),
+		newLength:     make(chan int, 100),
+		writeSyncChan: make(chan error, 5),
 	}
 	cache.Start(ctx, trash)
 	return cache

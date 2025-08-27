@@ -41,4 +41,5 @@ type Trash[T Indexable] interface {
 type CachedStorage[T Indexable] interface {
 	Set([]T)
 	Get([]string) (map[string]T, error)
+	Sync() chan error
 }
