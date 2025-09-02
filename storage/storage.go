@@ -17,7 +17,7 @@ func Collect[T any](src []Readonly[T]) []T {
 }
 
 type ColdStorage[T Indexable] interface {
-	Set([]Readonly[T]) error
+	Set([]Readonly[T])
 	Get([]string) (map[string]T, error)
 }
 
@@ -41,5 +41,4 @@ type Trash[T Indexable] interface {
 type CachedStorage[T Indexable] interface {
 	Set([]T)
 	Get([]string) (map[string]T, error)
-	Sync() chan error
 }
