@@ -7,7 +7,18 @@ import (
 	"github.com/JGpGH/golfu/storage"
 )
 
-func (s *cachedStorage[T]) Start(ctx context.Context, trash storage.Trash[T]) {
+type cachedStorage[T storage.Indexable] struct {
+	units    listop.IndexedList[storage.Trashable[T]]
+	cold     storage.ColdStorage[T]
+	maxUnits int
+	trash    storage.Trash[T]
+	ctx      context.Context
+	toCold   chan []storage.Trashable[T]
+}
+
+type NoopTrash[T storage.Indexable] struct{}
+
+func (s *cachedStorage[T]) Start(ctx context.Context) {
 	// cache storing routine for non-blocking Set
 	go func() {
 		for {
@@ -15,38 +26,36 @@ func (s *cachedStorage[T]) Start(ctx context.Context, trash storage.Trash[T]) {
 			case <-ctx.Done():
 				return
 			case in := <-s.toCold:
-				for _, u := range in {
-					u.SetPersisted()
-				}
-				s.cold.Set(asReadOnlyUnits(in))
-				s.units.Set(in)
+				s.cold.Set(ctx, in)
 				currentLen := s.units.Len()
 				if currentLen > s.maxUnits {
-					evicted := s.evict(currentLen - s.maxUnits + s.maxUnits/5) // evict 20% of the cache + everything above max
-					trash.Trash(evicted)
+					s.evict(currentLen - s.maxUnits + s.maxUnits/5) // evict 20% of the cache + everything above max
 				}
 			}
 		}
 	}()
 }
 
-func (s *cachedStorage[T]) Set(values []T) {
-	var toCache []persistable[T]
-	for _, v := range values {
-		toCache = append(toCache, persistable[T]{value: v, isPersisted: false})
-	}
-	units := toUnits(toCache)
-	s.units.Set(units)
-	s.toCold <- units
+func DefaultSetOptions() *storage.SetOptions {
+	return &storage.SetOptions{CanBeTrashed: true}
 }
 
-func (s *cachedStorage[T]) Get(indexes []string) (map[string]T, error) {
+func (s *cachedStorage[T]) Set(ctx context.Context, values []T, options *storage.SetOptions) {
+	if options == nil {
+		options = DefaultSetOptions()
+	}
+	trashables := storage.NewTrashables(values, options.CanBeTrashed)
+	s.units.Set(trashables)
+	s.toCold <- trashables
+}
+
+func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[string]T, error) {
 	var result = make(map[string]T)
 	var toFetch []string
 	cached := s.units.Get(indexes)
 	for _, c := range indexes {
 		if u, ok := cached[c]; ok {
-			result[c] = u.Read()
+			result[c] = u.Value()
 		} else {
 			toFetch = append(toFetch, c)
 		}
@@ -56,49 +65,58 @@ func (s *cachedStorage[T]) Get(indexes []string) (map[string]T, error) {
 		return result, nil
 	}
 
-	persisted, err := s.cold.Get(toFetch)
+	fromCold, err := s.cold.Get(ctx, toFetch)
 	if err != nil {
 		return nil, err
 	}
 
-	toCache := make([]T, len(persisted))
-	for k, v := range persisted {
+	toCache := make([]T, len(fromCold))
+	for k, v := range fromCold {
 		result[k] = v
 		toCache = append(toCache, v)
 	}
 
-	s.Set(toCache)
+	s.units.Set(storage.NewTrashables(toCache, false))
+
 	return result, nil
 }
 
-func (s *cachedStorage[T]) evict(amount int) []T {
+func (s *cachedStorage[T]) evict(amount int) {
 	if amount <= 0 {
-		return []T{}
+		return
 	}
 	s.units.SortByReadCount()
-	trashed := s.units.PopWhere(func(u *unit[T]) bool {
-		return u.IsPersisted()
+	trashed := s.units.PopWhere(func(u storage.Trashable[T]) bool {
+		return u.CanBeTrashed()
 	}, amount)
+	var trashedValues []T
+	for _, t := range trashed {
+		trashedValues = append(trashedValues, t.Value())
+	}
+	s.trash.Trash(s.ctx, trashedValues)
 	s.units.ClearReadCounts()
-	return values(trashed)
 }
 
-type cachedStorage[T storage.Indexable] struct {
-	units    listop.IndexedList[*unit[T]]
-	cold     storage.ColdStorage[T]
-	maxUnits int
-	ctx      context.Context
-	toCold   chan []*unit[T]
+func (n *NoopTrash[T]) Trash(ctx context.Context, values []T) error {
+	return nil
 }
 
-func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], trash storage.Trash[T], maxUnits int) storage.CachedStorage[T] {
+func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) storage.CachedStorage[T] {
+	coldTrash, ok := cold.(storage.Trash[T])
+	if !ok {
+		coldTrash = &NoopTrash[T]{}
+	}
+
 	cache := &cachedStorage[T]{
-		units:    listop.NewIndexedList[*unit[T]](),
+		units:    listop.NewIndexedList[storage.Trashable[T]](),
 		cold:     cold,
 		maxUnits: maxUnits,
+		trash:    coldTrash,
 		ctx:      ctx,
-		toCold:   make(chan []*unit[T], maxUnits),
+		toCold:   make(chan []storage.Trashable[T], maxUnits),
 	}
-	cache.Start(ctx, trash)
+
+	cache.Start(ctx)
+
 	return cache
 }

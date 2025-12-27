@@ -23,24 +23,26 @@ func NewTestColdStorage[T storage.Indexable]() *TestColdStorage[T] {
 	}
 }
 
-func (tcs *TestColdStorage[T]) Set(ins []storage.Readonly[T]) {
-	for _, in := range ins {
-		tcs.setted <- in.Read()
+func (tcs *TestColdStorage[T]) Set(ctx context.Context, values []storage.Trashable[T]) error {
+	for _, in := range values {
+		tcs.setted <- in.Value()
 	}
+	return nil
 }
 
-func (tcs *TestColdStorage[T]) Get(keys []string) (map[string]T, error) {
+func (tcs *TestColdStorage[T]) Get(ctx context.Context, indexes []string) (map[string]T, error) {
 	res := make(map[string]T)
-	for _, key := range keys {
+	for _, key := range indexes {
 		res[key] = tcs.inner[key]
 	}
 	return tcs.inner, nil
 }
 
-func (tcs *TestColdStorage[T]) Trash(ins []T) {
-	for _, in := range ins {
+func (tcs *TestColdStorage[T]) Trash(ctx context.Context, values []T) error {
+	for _, in := range values {
 		tcs.deleted <- in
 	}
+	return nil
 }
 
 func (tcs *TestColdStorage[T]) CollectSetted(ctx context.Context, max int) []T {
@@ -75,13 +77,13 @@ func (tcs *TestColdStorage[T]) CollectDeleted(ctx context.Context, max int) []T 
 
 func TestStorageSetThenGet(t *testing.T) {
 	cold := NewTestColdStorage[storage.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, cold, 10)
-	cache.Set([]storage.Indexed[int]{
+	cache := internal.NewCachedStorage(context.Background(), cold, 10)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("1", 1),
 		storage.NewIndexed("2", 2),
 		storage.NewIndexed("3", 3),
-	})
-	res, err := cache.Get([]string{"1", "2", "3"})
+	}, nil)
+	res, err := cache.Get(context.Background(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
@@ -92,21 +94,21 @@ func TestStorageSetThenGet(t *testing.T) {
 
 func TestStorageEvictsSortedByRead(t *testing.T) {
 	cold := NewTestColdStorage[storage.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, cold, 4)
-	cache.Set([]storage.Indexed[int]{
+	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("1", 1),
 		storage.NewIndexed("2", 2),
 		storage.NewIndexed("3", 3),
 		storage.NewIndexed("4", 0),
-	})
-	_, err := cache.Get([]string{"1", "2", "3"})
+	}, nil)
+	_, err := cache.Get(context.Background(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
 
-	cache.Set([]storage.Indexed[int]{
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("5", 1),
-	})
+	}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 1)
@@ -126,26 +128,26 @@ func TestStorageEvictsSortedByRead(t *testing.T) {
 
 func TestStorageEvictsSortedByRead2(t *testing.T) {
 	cold := NewTestColdStorage[storage.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, cold, 4)
-	cache.Set([]storage.Indexed[int]{
+	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("1", 1),
 		storage.NewIndexed("2", 2),
 		storage.NewIndexed("3", 0),
 		storage.NewIndexed("4", 0),
-	})
-	_, err := cache.Get([]string{"1", "2", "3"})
+	}, nil)
+	_, err := cache.Get(context.Background(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Get([]string{"1", "2"})
+	_, err = cache.Get(context.Background(), []string{"1", "2"})
 	if err != nil {
 		t.Error(err)
 	}
 
-	cache.Set([]storage.Indexed[int]{
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("5", 1),
 		storage.NewIndexed("6", 3),
-	})
+	}, &storage.SetOptions{CanBeTrashed: false})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	r := cold.CollectDeleted(ctx, 5)
@@ -155,36 +157,36 @@ func TestStorageEvictsSortedByRead2(t *testing.T) {
 	}
 	for _, in := range r {
 		if in.Value != 0 {
-			t.Errorf("Eviction of higher ranked values detected: %d", in.Value)
+			t.Errorf("Eviction of higher ranked values detected: %d with index %s", in.Value, in.Index())
 		}
 	}
 }
 
 func TestStorageEvictsOldest(t *testing.T) {
 	cold := NewTestColdStorage[storage.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, cold, 4)
-	cache.Set([]storage.Indexed[int]{
+	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("1", 1),
 		storage.NewIndexed("2", 2),
 		storage.NewIndexed("3", 3),
-	})
-	_, err := cache.Get([]string{"1", "2", "3"})
+	}, nil)
+	_, err := cache.Get(context.Background(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Get([]string{"1", "2", "3"})
+	_, err = cache.Get(context.Background(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	cache.Set([]storage.Indexed[int]{
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("5", 0),
 		storage.NewIndexed("6", 0),
-	})
-	_, err = cache.Get([]string{"5", "6"})
+	}, nil)
+	_, err = cache.Get(context.Background(), []string{"5", "6"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Get([]string{"5", "6"})
+	_, err = cache.Get(context.Background(), []string{"5", "6"})
 	if err != nil {
 		t.Error(err)
 	}
@@ -203,8 +205,8 @@ func TestStorageEvictsOldest(t *testing.T) {
 
 func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 	cold := NewTestColdStorage[storage.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, cold, 10)
-	cache.Set([]storage.Indexed[int]{
+	cache := internal.NewCachedStorage(context.Background(), cold, 10)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("1", 1),
 		storage.NewIndexed("2", 2),
 		storage.NewIndexed("3", 3),
@@ -215,10 +217,10 @@ func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 		storage.NewIndexed("8", 8),
 		storage.NewIndexed("9", 9),
 		storage.NewIndexed("10", 10),
-	})
-	cache.Set([]storage.Indexed[int]{
+	}, nil)
+	cache.Set(context.Background(), []storage.Indexed[int]{
 		storage.NewIndexed("11", 11),
-	})
+	}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 3)
 	cancel()

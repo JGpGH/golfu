@@ -7,6 +7,10 @@ import (
 	"github.com/JGpGH/golfu/storage"
 )
 
-func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], trash storage.Trash[T], maxUnits int) storage.CachedStorage[T] {
-	return internal.NewCachedStorage(ctx, cold, trash, maxUnits)
+func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) storage.CachedStorage[T] {
+	return internal.NewCachedStorage(ctx, cold, maxUnits)
+}
+
+func NewNoopTrash[T storage.Indexable]() storage.Trash[T] {
+	return &internal.NoopTrash[T]{}
 }
