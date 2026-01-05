@@ -86,7 +86,7 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 		toCache = append(toCache, v)
 	}
 
-	s.units.Set(storage.NewTrashables(toCache, false))
+	s.units.Set(storage.NewTrashables(toCache, true))
 
 	if span.IsRecording() {
 		span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
