@@ -88,23 +88,21 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 
 	s.units.Set(storage.NewTrashables(toCache, true))
 
-	if span.IsRecording() {
-		span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
-		span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
-		span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
-		if err != nil {
-			span.RecordError(err)
-		}
-		totalHits := inMemoryHits + len(fromCold)
-		if totalHits == 0 {
-			span.SetStatus(codes.Error, Error)
-		} else if totalHits < len(indexes) {
-			span.SetStatus(codes.Ok, PartialSuccess)
-		} else if totalHits > len(indexes) {
-			span.SetStatus(codes.Error, TooManyItemsMessage)
-		} else {
-			span.SetStatus(codes.Ok, Success)
-		}
+	span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
+	span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
+	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
+	if err != nil {
+		span.RecordError(err)
+	}
+	totalHits := inMemoryHits + len(fromCold)
+	if totalHits == 0 {
+		span.SetStatus(codes.Error, Error)
+	} else if totalHits < len(indexes) {
+		span.SetStatus(codes.Ok, PartialSuccess)
+	} else if totalHits > len(indexes) {
+		span.SetStatus(codes.Error, TooManyItemsMessage)
+	} else {
+		span.SetStatus(codes.Ok, Success)
 	}
 
 	return result, err
