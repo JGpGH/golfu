@@ -45,7 +45,7 @@ func NewTrashable[T Indexable](value T, canBeTrashed bool) Trashable[T] {
 
 func NewTrashables[T Indexable](values []T, canBeTrashed bool) []Trashable[T] {
 	var result []Trashable[T]
-	for k, _ := range values {
+	for k := range values {
 		result = append(result, NewTrashable(values[k], canBeTrashed))
 	}
 	return result
