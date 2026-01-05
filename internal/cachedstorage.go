@@ -81,9 +81,9 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 	fromCold, err := s.cold.Get(ctx, toFetch)
 
 	toCache := make([]T, len(fromCold))
-	for k, v := range fromCold {
-		result[k] = v
-		toCache = append(toCache, v)
+	for k := range fromCold {
+		result[k] = fromCold[k]
+		toCache = append(toCache, fromCold[k])
 	}
 
 	s.units.Set(storage.NewTrashables(toCache, true))
