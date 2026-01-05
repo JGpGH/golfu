@@ -5,6 +5,10 @@ import (
 
 	"github.com/JGpGH/golfu/internal/listop"
 	"github.com/JGpGH/golfu/storage"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type cachedStorage[T storage.Indexable] struct {
@@ -14,6 +18,7 @@ type cachedStorage[T storage.Indexable] struct {
 	trash    storage.Trash[T]
 	ctx      context.Context
 	toCold   chan []storage.Trashable[T]
+	tracer   trace.Tracer
 }
 
 type NoopTrash[T storage.Indexable] struct{}
@@ -41,6 +46,10 @@ func DefaultSetOptions() *storage.SetOptions {
 }
 
 func (s *cachedStorage[T]) Set(ctx context.Context, values []T, options *storage.SetOptions) {
+	ctx, span := s.tracer.Start(ctx, "cachedStorage.Set")
+	defer span.End()
+	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(values)))
+
 	if options == nil {
 		options = DefaultSetOptions()
 	}
@@ -50,12 +59,16 @@ func (s *cachedStorage[T]) Set(ctx context.Context, values []T, options *storage
 }
 
 func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[string]T, error) {
+	ctx, span := s.tracer.Start(ctx, "cachedStorage.Get")
+	defer span.End()
 	var result = make(map[string]T)
+	var inMemoryHits int
 	var toFetch []string
 	cached := s.units.Get(indexes)
 	for _, c := range indexes {
 		if u, ok := cached[c]; ok {
 			result[c] = u.Value()
+			inMemoryHits++
 		} else {
 			toFetch = append(toFetch, c)
 		}
@@ -66,9 +79,6 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 	}
 
 	fromCold, err := s.cold.Get(ctx, toFetch)
-	if err != nil {
-		return nil, err
-	}
 
 	toCache := make([]T, len(fromCold))
 	for k, v := range fromCold {
@@ -78,7 +88,26 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 
 	s.units.Set(storage.NewTrashables(toCache, false))
 
-	return result, nil
+	if span.IsRecording() {
+		span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
+		span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
+		span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
+		if err != nil {
+			span.RecordError(err)
+		}
+		totalHits := inMemoryHits + len(fromCold)
+		if totalHits == 0 {
+			span.SetStatus(codes.Error, Error)
+		} else if totalHits < len(indexes) {
+			span.SetStatus(codes.Ok, PartialSuccess)
+		} else if totalHits > len(indexes) {
+			span.SetStatus(codes.Error, TooManyItemsMessage)
+		} else {
+			span.SetStatus(codes.Ok, Success)
+		}
+	}
+
+	return result, err
 }
 
 func (s *cachedStorage[T]) evict(amount int) {
@@ -113,6 +142,7 @@ func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.Col
 		maxUnits: maxUnits,
 		trash:    coldTrash,
 		ctx:      ctx,
+		tracer:   otel.GetTracerProvider().Tracer(TracerName),
 		toCold:   make(chan []storage.Trashable[T], maxUnits),
 	}
 
