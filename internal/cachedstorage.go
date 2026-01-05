@@ -85,7 +85,7 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 		span.RecordError(err)
 	}
 
-	toCache := make([]T, len(fromCold))
+	toCache := make([]T, 0, len(fromCold))
 	for k := range fromCold {
 		result[k] = fromCold[k]
 		toCache = append(toCache, fromCold[k])
