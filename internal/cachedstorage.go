@@ -61,6 +61,7 @@ func (s *cachedStorage[T]) Set(ctx context.Context, values []T, options *storage
 func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[string]T, error) {
 	ctx, span := s.tracer.Start(ctx, "cachedStorage.Get")
 	defer span.End()
+	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
 	var result = make(map[string]T)
 	var inMemoryHits int
 	var toFetch []string
@@ -73,12 +74,16 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 			toFetch = append(toFetch, c)
 		}
 	}
+	span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
 
 	if len(toFetch) == 0 {
 		return result, nil
 	}
 
 	fromCold, err := s.cold.Get(ctx, toFetch)
+	if err != nil {
+		span.RecordError(err)
+	}
 
 	toCache := make([]T, len(fromCold))
 	for k := range fromCold {
@@ -88,12 +93,8 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 
 	s.units.Set(storage.NewTrashables(toCache, true))
 
-	span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
 	span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
-	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
-	if err != nil {
-		span.RecordError(err)
-	}
+
 	totalHits := inMemoryHits + len(fromCold)
 	if totalHits == 0 {
 		span.SetStatus(codes.Error, Error)
