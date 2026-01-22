@@ -3,25 +3,25 @@ package internal
 import (
 	"context"
 
-	"github.com/JGpGH/golfu/internal/listop"
+	"github.com/JGpGH/golfu/element"
+	"github.com/JGpGH/golfu/listop"
 	"github.com/JGpGH/golfu/storage"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
-type cachedStorage[T storage.Indexable] struct {
-	units    listop.IndexedList[storage.Trashable[T]]
-	cold     storage.ColdStorage[T]
-	maxUnits int
-	trash    storage.Trash[T]
-	ctx      context.Context
-	toCold   chan []storage.Trashable[T]
-	tracer   trace.Tracer
+type cachedStorage[T element.Indexable] struct {
+	isTrashable *bool
+	inMemory    listop.IndexedList[T]
+	cold        storage.ColdStorage[T]
+	maxUnits    int
+	ctx         context.Context
+	toCold      chan []T
+	tracer      trace.Tracer
 }
 
-type NoopTrash[T storage.Indexable] struct{}
+type NoopTrash[T element.Indexable] struct{}
 
 func (s *cachedStorage[T]) Start(ctx context.Context) {
 	// cache storing routine for non-blocking Set
@@ -32,7 +32,7 @@ func (s *cachedStorage[T]) Start(ctx context.Context) {
 				return
 			case in := <-s.toCold:
 				s.cold.Set(ctx, in)
-				currentLen := s.units.Len()
+				currentLen := s.inMemory.Len()
 				if currentLen > s.maxUnits {
 					s.evict(currentLen - s.maxUnits + s.maxUnits/5) // evict 20% of the cache + everything above max
 				}
@@ -41,34 +41,30 @@ func (s *cachedStorage[T]) Start(ctx context.Context) {
 	}()
 }
 
-func DefaultSetOptions() *storage.SetOptions {
-	return &storage.SetOptions{CanBeTrashed: true}
-}
-
-func (s *cachedStorage[T]) Set(ctx context.Context, values []T, options *storage.SetOptions) {
-	ctx, span := s.tracer.Start(ctx, "cachedStorage.Set")
+func (s *cachedStorage[T]) Set(ctx context.Context, values []T) error {
+	ctx, span := s.tracer.Start(ctx, "cachedelement.Set")
 	defer span.End()
-	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(values)))
-
-	if options == nil {
-		options = DefaultSetOptions()
+	if s.isTrashable == nil && len(values) > 0 {
+		_, ok := any(values[0]).(element.Trashable)
+		s.isTrashable = &ok
 	}
-	trashables := storage.NewTrashables(values, options.CanBeTrashed)
-	s.units.Set(trashables)
-	s.toCold <- trashables
+	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(values)))
+	s.inMemory.Set(values)
+	s.toCold <- values
+	return nil
 }
 
-func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[string]T, error) {
-	ctx, span := s.tracer.Start(ctx, "cachedStorage.Get")
+func (s *cachedStorage[T]) Gets(ctx context.Context, indexes []string) (map[string]T, error) {
+	ctx, span := s.tracer.Start(ctx, "cachedelement.Get")
 	defer span.End()
 	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
 	var result = make(map[string]T)
 	var inMemoryHits int
 	var toFetch []string
-	cached := s.units.Get(indexes)
+	cached := s.inMemory.Gets(indexes)
 	for _, c := range indexes {
 		if u, ok := cached[c]; ok {
-			result[c] = u.Value()
+			result[c] = u
 			inMemoryHits++
 		} else {
 			toFetch = append(toFetch, c)
@@ -80,7 +76,7 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 		return result, nil
 	}
 
-	fromCold, err := s.cold.Get(ctx, toFetch)
+	fromCold, err := s.cold.Gets(ctx, toFetch)
 	if err != nil {
 		span.RecordError(err)
 	}
@@ -91,58 +87,58 @@ func (s *cachedStorage[T]) Get(ctx context.Context, indexes []string) (map[strin
 		toCache = append(toCache, fromCold[k])
 	}
 
-	s.units.Set(storage.NewTrashables(toCache, true))
+	s.inMemory.Set(toCache)
 
 	span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
 
-	totalHits := inMemoryHits + len(fromCold)
-	if totalHits == 0 {
-		span.SetStatus(codes.Error, Error)
-	} else if totalHits < len(indexes) {
-		span.SetStatus(codes.Ok, PartialSuccess)
-	} else if totalHits > len(indexes) {
-		span.SetStatus(codes.Error, TooManyItemsMessage)
-	} else {
-		span.SetStatus(codes.Ok, Success)
+	return result, err
+}
+
+func (s *cachedStorage[T]) Get(ctx context.Context, index string) (*T, error) {
+	cached := s.inMemory.Get(index)
+	if cached != nil {
+		return cached, nil
 	}
 
-	return result, err
+	fromCold, err := s.cold.Get(ctx, index)
+	if err != nil {
+		return nil, err
+	}
+
+	s.inMemory.Set([]T{*fromCold})
+
+	return fromCold, nil
 }
 
 func (s *cachedStorage[T]) evict(amount int) {
 	if amount <= 0 {
 		return
 	}
-	s.units.SortByReadCount()
-	trashed := s.units.PopWhere(func(u storage.Trashable[T]) bool {
-		return u.CanBeTrashed()
-	}, amount)
-	var trashedValues []T
-	for _, t := range trashed {
-		trashedValues = append(trashedValues, t.Value())
+	s.inMemory.SortByReadCount()
+	if s.isTrashable == nil || !*s.isTrashable {
+		trashed := s.inMemory.Pop(amount)
+		s.cold.Trash(s.ctx, trashed)
+	} else {
+		trashed := s.inMemory.PopWhere(func(t T) bool {
+			return any(t).(element.Trashable).CanBeTrashed()
+		}, amount)
+		s.cold.Trash(s.ctx, trashed)
 	}
-	s.trash.Trash(s.ctx, trashedValues)
-	s.units.ClearReadCounts()
+	s.inMemory.ClearReadCounts()
 }
 
 func (n *NoopTrash[T]) Trash(ctx context.Context, values []T) error {
 	return nil
 }
 
-func NewCachedStorage[T storage.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) storage.CachedStorage[T] {
-	coldTrash, ok := cold.(storage.Trash[T])
-	if !ok {
-		coldTrash = &NoopTrash[T]{}
-	}
-
+func NewCachedStorage[T element.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) storage.CachedStorage[T] {
 	cache := &cachedStorage[T]{
-		units:    listop.NewIndexedList[storage.Trashable[T]](),
+		inMemory: listop.NewIndexedList[T](),
 		cold:     cold,
 		maxUnits: maxUnits,
-		trash:    coldTrash,
 		ctx:      ctx,
 		tracer:   otel.GetTracerProvider().Tracer(TracerName),
-		toCold:   make(chan []storage.Trashable[T], maxUnits),
+		toCold:   make(chan []T, maxUnits),
 	}
 
 	cache.Start(ctx)

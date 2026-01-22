@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/JGpGH/golfu/internal/listop"
+	"github.com/JGpGH/golfu/listop"
 )
 
 type testStruct struct {
@@ -25,7 +25,7 @@ func Test_IndexedList_SetThenGet(t *testing.T) {
 	test4 := &testStruct{ID: "4", is_something: false}
 
 	indexedList.Set([]*testStruct{test1, test2, test3, test4})
-	r := indexedList.Get([]string{"1", "2", "3", "4"})
+	r := indexedList.Gets([]string{"1", "2", "3", "4"})
 	if len(r) != 4 {
 		t.Error("Expected 4 elements, got ", len(r))
 	}
@@ -45,7 +45,7 @@ func Test_IndexedList_SetThenGet(t *testing.T) {
 		t.Error("Expected test4 to be false, got true")
 	}
 	indexedList.Set([]*testStruct{{ID: "4", is_something: true}})
-	r = indexedList.Get([]string{"4"})
+	r = indexedList.Gets([]string{"4"})
 	if r["4"].is_something == false {
 		t.Error("Expected test4 to be true, got false")
 	}
@@ -59,9 +59,9 @@ func Test_IndexedList_GetReadWriteCounts(t *testing.T) {
 	test4 := &testStruct{ID: "4", is_something: false}
 
 	indexedList.Set([]*testStruct{test1, test2, test3, test4})
-	indexedList.Get([]string{"1", "2", "3", "4"})
-	indexedList.Get([]string{"1", "2", "3", "4"})
-	indexedList.Get([]string{"2"})
+	indexedList.Gets([]string{"1", "2", "3", "4"})
+	indexedList.Gets([]string{"1", "2", "3", "4"})
+	indexedList.Gets([]string{"2"})
 	expected := map[string]uint32{
 		"1": 3,
 		"2": 4,
@@ -75,7 +75,7 @@ func Test_IndexedList_GetReadWriteCounts(t *testing.T) {
 		}
 	}
 
-	indexedList.Get([]string{"2"})
+	indexedList.Gets([]string{"2"})
 	expected["2"] = 5
 	r = indexedList.ReadWriteCounts([]string{"1", "2", "3", "4"})
 	for k, v := range r {
@@ -84,9 +84,9 @@ func Test_IndexedList_GetReadWriteCounts(t *testing.T) {
 		}
 	}
 
-	indexedList.Get([]string{"3", "4"})
-	indexedList.Get([]string{"3", "4"})
-	indexedList.Get([]string{"3", "4"})
+	indexedList.Gets([]string{"3", "4"})
+	indexedList.Gets([]string{"3", "4"})
+	indexedList.Gets([]string{"3", "4"})
 
 	expected["3"] = 6
 	expected["4"] = 6
@@ -109,7 +109,7 @@ func Test_IndexedList_Remove(t *testing.T) {
 	indexedList.Set([]*testStruct{test1, test2, test3, test4})
 	indexedList.Remove([]string{"2", "3"})
 
-	r := indexedList.Get([]string{"1", "2", "3", "4"})
+	r := indexedList.Gets([]string{"1", "2", "3", "4"})
 	if len(r) != 2 {
 		t.Error("Expected 2 elements, got ", len(r))
 	}
@@ -120,7 +120,7 @@ func Test_IndexedList_Remove(t *testing.T) {
 		t.Error("Expected test4, got ", r["4"])
 	}
 	indexedList.Remove([]string{"1"})
-	r = indexedList.Get([]string{"1", "2", "3", "4"})
+	r = indexedList.Gets([]string{"1", "2", "3", "4"})
 	if len(r) != 1 {
 		t.Error("Expected 1 elements, got ", len(r))
 	}
@@ -142,7 +142,7 @@ func Test_IndexedList_PopWhere(t *testing.T) {
 	indexedList.PopWhere(func(t *testStruct) bool {
 		return !t.is_something
 	}, 2)
-	r := indexedList.Get([]string{"1", "2", "3", "4", "5", "6"})
+	r := indexedList.Gets([]string{"1", "2", "3", "4", "5", "6"})
 	if len(r) != 4 {
 		t.Error("Expected 4 elements, got ", len(r))
 	}
@@ -166,14 +166,14 @@ func Test_IndexedList_SortByReadCount_EqualGroups(t *testing.T) {
 	test5 := &testStruct{ID: "5", is_something: true}
 
 	indexedList.Set([]*testStruct{test1, test2, test3, test4, test5})
-	r := indexedList.Get([]string{"4", "3", "1", "2"})
+	r := indexedList.Gets([]string{"4", "3", "1", "2"})
 	if len(r) != 4 {
 		t.Error("Expected 4 elements, got ", len(r))
 	}
-	indexedList.Get([]string{"1", "4", "3", "2"})
-	indexedList.Get([]string{"1", "4"})
-	indexedList.Get([]string{"1", "4"})
-	indexedList.Get([]string{"1", "4"})
+	indexedList.Gets([]string{"1", "4", "3", "2"})
+	indexedList.Gets([]string{"1", "4"})
+	indexedList.Gets([]string{"1", "4"})
+	indexedList.Gets([]string{"1", "4"})
 	rcBf := indexedList.OrderedReadWriteCounts()
 	indexedList.SortByReadCount()
 	hasErr := false
@@ -232,7 +232,7 @@ func Test_IndexedList_SortByReadCount_NormalyDistributed(t *testing.T) {
 		allIds = append(allIds, strconv.Itoa(i))
 	}
 	for i := 0; i < 50; i++ {
-		indexedList.Get([]string{allIds[rand.Intn(len(allIds))], allIds[rand.Intn(len(allIds))]})
+		indexedList.Gets([]string{allIds[rand.Intn(len(allIds))], allIds[rand.Intn(len(allIds))]})
 	}
 	indexedList.SortByReadCount()
 	ordered := indexedList.OrderedReadWriteCounts()

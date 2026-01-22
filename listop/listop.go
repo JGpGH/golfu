@@ -5,11 +5,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/JGpGH/golfu/storage"
+	"github.com/JGpGH/golfu/element"
 )
 
 // readCountTracker over an Element with value of type T
-type readCountTracker[T storage.Indexable] struct {
+type readCountTracker[T element.Indexable] struct {
 	Element        *list.Element
 	ReadWriteCount *atomic.Uint32
 }
@@ -22,13 +22,13 @@ func (c *readCountTracker[T]) Value() T {
 	return c.Element.Value.(T)
 }
 
-type IndexedList[T storage.Indexable] struct {
+type IndexedList[T element.Indexable] struct {
 	indexed map[string]readCountTracker[T]
 	sorted  list.List
 	lock    sync.RWMutex
 }
 
-func NewIndexedList[T storage.Indexable]() IndexedList[T] {
+func NewIndexedList[T element.Indexable]() IndexedList[T] {
 	return IndexedList[T]{
 		indexed: map[string]readCountTracker[T]{},
 		sorted:  list.List{},
@@ -54,7 +54,7 @@ func (l *IndexedList[T]) Remove(indexes []string) int {
 	return count
 }
 
-func (l *IndexedList[T]) Get(indexes []string) map[string]T {
+func (l *IndexedList[T]) Gets(indexes []string) map[string]T {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
 	res := make(map[string]T)
@@ -65,6 +65,17 @@ func (l *IndexedList[T]) Get(indexes []string) map[string]T {
 		}
 	}
 	return res
+}
+
+func (l *IndexedList[T]) Get(index string) *T {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	if c, ok := l.indexed[index]; ok {
+		c.ReadWriteCount.Add(1)
+		val := c.Value()
+		return &val
+	}
+	return nil
 }
 
 // returns the read write count for the given indexes; does not affect the count
