@@ -6,7 +6,6 @@ import (
 	"github.com/JGpGH/golfu/element"
 	"github.com/JGpGH/golfu/listop"
 	"github.com/JGpGH/golfu/storage"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -39,44 +38,32 @@ func (s *CachedStorage[T]) Start(ctx context.Context) {
 }
 
 func (s *CachedStorage[T]) Set(ctx context.Context, values []T) error {
-	ctx, span := s.Tracer.Start(ctx, "cachedelement.Set")
-	defer span.End()
 	if s.IsTrashable == nil && len(values) > 0 {
 		_, ok := any(values[0]).(element.Trashable)
 		s.IsTrashable = &ok
 	}
-	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(values)))
 	s.InMemory.Set(values)
 	s.ToCold <- values
 	return nil
 }
 
 func (s *CachedStorage[T]) Gets(ctx context.Context, indexes []string) (map[string]T, error) {
-	ctx, span := s.Tracer.Start(ctx, "cachedelement.Get")
-	defer span.End()
-	span.SetAttributes(attribute.Int(ItemLengthAttribute, len(indexes)))
 	var result = make(map[string]T)
-	var inMemoryHits int
 	var toFetch []string
 	cached := s.InMemory.Gets(indexes)
 	for _, c := range indexes {
 		if u, ok := cached[c]; ok {
 			result[c] = u
-			inMemoryHits++
 		} else {
 			toFetch = append(toFetch, c)
 		}
 	}
-	span.SetAttributes(attribute.Int(InMemoryHitsAttribute, inMemoryHits))
 
 	if len(toFetch) == 0 {
 		return result, nil
 	}
 
 	fromCold, err := s.Cold.Gets(ctx, toFetch)
-	if err != nil {
-		span.RecordError(err)
-	}
 
 	toCache := make([]T, 0, len(fromCold))
 	for k := range fromCold {
@@ -85,8 +72,6 @@ func (s *CachedStorage[T]) Gets(ctx context.Context, indexes []string) (map[stri
 	}
 
 	s.InMemory.Set(toCache)
-
-	span.SetAttributes(attribute.Int(ColdHitsAttribute, len(fromCold)))
 
 	return result, err
 }

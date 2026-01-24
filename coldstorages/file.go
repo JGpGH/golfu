@@ -75,6 +75,10 @@ func (fs *FileStorage[T]) Set(ctx context.Context, values []T) error {
 	return nil
 }
 
+func (fs *FileStorage[T]) Trash(ctx context.Context, values []T) error {
+	return nil
+}
+
 func (fs *FileStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 	ctx, span := otel.GetTracerProvider().Tracer("FileStorage").Start(ctx, "FileStorage.Get")
 	defer span.End()
