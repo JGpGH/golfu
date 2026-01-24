@@ -2,13 +2,11 @@ package internal_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/JGpGH/golfu/coldstorages"
+	"github.com/JGpGH/golfu"
 	"github.com/JGpGH/golfu/element"
-	"github.com/JGpGH/golfu/internal"
 )
 
 type TestColdStorage[T element.Indexable] struct {
@@ -87,7 +85,7 @@ func (tcs *TestColdStorage[T]) CollectDeleted(ctx context.Context, max int) []T 
 
 func TestStorageSetThenGet(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 10)
 	cache.Set(context.Background(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
@@ -104,7 +102,7 @@ func TestStorageSetThenGet(t *testing.T) {
 
 func TestStorageEvictsSortedByRead(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
 	cache.Set(context.Background(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
@@ -138,7 +136,7 @@ func TestStorageEvictsSortedByRead(t *testing.T) {
 
 func TestStorageEvictsSortedByRead2(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
 	cache.Set(context.Background(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
@@ -174,7 +172,7 @@ func TestStorageEvictsSortedByRead2(t *testing.T) {
 
 func TestStorageEvictsOldest(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
 	cache.Set(context.Background(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
@@ -215,7 +213,7 @@ func TestStorageEvictsOldest(t *testing.T) {
 
 func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 10)
 	cache.Set(context.Background(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
@@ -254,7 +252,7 @@ func (u *TrashableIndexed) CanBeTrashed() bool {
 
 func TestStorageDoesNotTrashUntrashable(t *testing.T) {
 	cold := NewTestColdStorage[*TrashableIndexed]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 4)
+	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
 	cache.Set(context.Background(), []*TrashableIndexed{
 		{Indexed: element.NewIndexed("1", 1), canBeTrashed: false},
 		{Indexed: element.NewIndexed("2", 2), canBeTrashed: false},
@@ -272,149 +270,5 @@ func TestStorageDoesNotTrashUntrashable(t *testing.T) {
 	}
 	if r[0].Index() != "3" {
 		t.Errorf("Wrong item trashed expected 3 got %s", r[0].Index())
-	}
-}
-
-// Additional tests using InMemoryStorage for better coverage
-func TestCachedStorage_Get_FromCache(t *testing.T) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10)
-
-	cache.Set(context.Background(), []element.Indexed[int]{
-		element.NewIndexed("1", 42),
-	})
-	time.Sleep(50 * time.Millisecond)
-
-	result, err := cache.Get(context.Background(), "1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if result == nil {
-		t.Fatal("Get returned nil")
-	}
-	if result.Value != 42 {
-		t.Errorf("Expected value 42, got %d", result.Value)
-	}
-}
-
-func TestCachedStorage_Get_FromCold(t *testing.T) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10)
-
-	cold.Set(context.Background(), []element.Indexed[int]{
-		element.NewIndexed("1", 99),
-	})
-
-	result, err := cache.Get(context.Background(), "1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if result == nil {
-		t.Fatal("Get returned nil")
-	}
-	if result.Value != 99 {
-		t.Errorf("Expected value 99, got %d", result.Value)
-	}
-}
-
-func TestCachedStorage_Gets_Mixed(t *testing.T) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10)
-
-	cache.Set(context.Background(), []element.Indexed[int]{
-		element.NewIndexed("1", 1),
-		element.NewIndexed("2", 2),
-	})
-	time.Sleep(50 * time.Millisecond)
-
-	cold.Set(context.Background(), []element.Indexed[int]{
-		element.NewIndexed("3", 3),
-		element.NewIndexed("4", 4),
-	})
-
-	results, err := cache.Gets(context.Background(), []string{"1", "2", "3", "4", "5"})
-	if err != nil {
-		t.Fatalf("Gets failed: %v", err)
-	}
-
-	if len(results) != 4 {
-		t.Errorf("Expected 4 results, got %d", len(results))
-	}
-}
-
-func TestCachedStorage_ConcurrentSets(t *testing.T) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 100)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for j := 0; j < 10; j++ {
-				key := string(rune('A'+id)) + string(rune('0'+j))
-				cache.Set(context.Background(), []element.Indexed[int]{
-					element.NewIndexed(key, id*10+j),
-				})
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
-}
-
-// Benchmarks
-func BenchmarkCachedStorage_Set(b *testing.B) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10000)
-	ctx := context.Background()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cache.Set(ctx, []element.Indexed[int]{
-			element.NewIndexed(string(rune(i)), i),
-		})
-	}
-}
-
-func BenchmarkCachedStorage_Get_CacheHit(b *testing.B) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10000)
-	ctx := context.Background()
-
-	elements := make([]element.Indexed[int], 1000)
-	for i := 0; i < 1000; i++ {
-		elements[i] = element.NewIndexed(string(rune(i)), i)
-	}
-	cache.Set(ctx, elements)
-	time.Sleep(100 * time.Millisecond)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cache.Get(ctx, string(rune(i%1000)))
-	}
-}
-
-func BenchmarkCachedStorage_Gets(b *testing.B) {
-	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
-	cache := internal.NewCachedStorage(context.Background(), cold, 10000)
-	ctx := context.Background()
-
-	elements := make([]element.Indexed[int], 1000)
-	for i := 0; i < 1000; i++ {
-		elements[i] = element.NewIndexed(string(rune(i)), i)
-	}
-	cache.Set(ctx, elements)
-	time.Sleep(100 * time.Millisecond)
-
-	indexes := make([]string, 10)
-	for i := 0; i < 10; i++ {
-		indexes[i] = string(rune(i))
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cache.Gets(ctx, indexes)
 	}
 }

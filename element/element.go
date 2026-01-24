@@ -9,6 +9,15 @@ type Indexed[T any] struct {
 	Value T
 }
 
+type TrashableIndexed[T any] struct {
+	Indexed[T]
+	canBeTrashed bool
+}
+
+func (t *TrashableIndexed[T]) CanBeTrashed() bool {
+	return t.canBeTrashed
+}
+
 type Trashable interface {
 	CanBeTrashed() bool
 }
