@@ -75,7 +75,7 @@ func (fs *FileStorage[T]) Set(ctx context.Context, values []T) error {
 	return nil
 }
 
-func (fs *FileStorage[T]) Trash(ctx context.Context, values []T) error {
+func (fs *FileStorage[T]) OnEviction(ctx context.Context, values []T) error {
 	return nil
 }
 

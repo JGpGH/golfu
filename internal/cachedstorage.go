@@ -6,17 +6,15 @@ import (
 	"github.com/JGpGH/golfu/element"
 	"github.com/JGpGH/golfu/listop"
 	"github.com/JGpGH/golfu/storage"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type CachedStorage[T element.Indexable] struct {
-	IsTrashable *bool
+	IsEvictable bool
 	InMemory    listop.IndexedList[T]
 	Cold        storage.ColdStorage[T]
 	MaxUnits    int
 	Ctx         context.Context
 	ToCold      chan []T
-	Tracer      trace.Tracer
 }
 
 func (s *CachedStorage[T]) Start(ctx context.Context) {
@@ -38,10 +36,6 @@ func (s *CachedStorage[T]) Start(ctx context.Context) {
 }
 
 func (s *CachedStorage[T]) Set(ctx context.Context, values []T) error {
-	if s.IsTrashable == nil && len(values) > 0 {
-		_, ok := any(values[0]).(element.Trashable)
-		s.IsTrashable = &ok
-	}
 	s.InMemory.Set(values)
 	s.ToCold <- values
 	return nil
@@ -97,14 +91,33 @@ func (s *CachedStorage[T]) evict(amount int) {
 		return
 	}
 	s.InMemory.SortByReadCount()
-	if s.IsTrashable == nil || !*s.IsTrashable {
-		trashed := s.InMemory.Pop(amount)
-		s.Cold.Trash(s.Ctx, trashed)
+	if !s.IsEvictable {
+		evicted := s.InMemory.Pop(amount)
+		s.Cold.OnEviction(s.Ctx, evicted)
 	} else {
-		trashed := s.InMemory.PopWhere(func(t T) bool {
-			return any(t).(element.Trashable).CanBeTrashed()
+		evicted := s.InMemory.PopWhere(func(t T) bool {
+			return any(t).(element.Evictable).CanBeEvicted()
 		}, amount)
-		s.Cold.Trash(s.Ctx, trashed)
+		s.Cold.OnEviction(s.Ctx, evicted)
 	}
 	s.InMemory.ClearReadCounts()
+}
+
+func NewCachedStorage[T element.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) *CachedStorage[T] {
+	var elementInspection T
+
+	_, isEvictable := any(elementInspection).(element.Evictable)
+
+	cache := &CachedStorage[T]{
+		InMemory:    listop.NewIndexedList[T](),
+		Cold:        cold,
+		MaxUnits:    maxUnits,
+		Ctx:         ctx,
+		ToCold:      make(chan []T, maxUnits),
+		IsEvictable: isEvictable,
+	}
+
+	cache.Start(ctx)
+
+	return cache
 }

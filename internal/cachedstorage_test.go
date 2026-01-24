@@ -46,7 +46,7 @@ func (tcs *TestColdStorage[T]) Get(ctx context.Context, index string) (*T, error
 	return &res, nil
 }
 
-func (tcs *TestColdStorage[T]) Trash(ctx context.Context, values []T) error {
+func (tcs *TestColdStorage[T]) OnEviction(ctx context.Context, values []T) error {
 	for _, in := range values {
 		tcs.deleted <- in
 	}
@@ -85,13 +85,13 @@ func (tcs *TestColdStorage[T]) CollectDeleted(ctx context.Context, max int) []T 
 
 func TestStorageSetThenGet(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 10)
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
 		element.NewIndexed("3", 3),
 	})
-	res, err := cache.Gets(context.Background(), []string{"1", "2", "3"})
+	res, err := cache.Gets(t.Context(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
@@ -102,23 +102,23 @@ func TestStorageSetThenGet(t *testing.T) {
 
 func TestStorageEvictsSortedByRead(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
 		element.NewIndexed("3", 3),
 		element.NewIndexed("4", 0),
 	})
-	_, err := cache.Gets(context.Background(), []string{"1", "2", "3"})
+	_, err := cache.Gets(t.Context(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
 
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("5", 1),
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 1)
 	if ctx.Err() != nil {
 		t.Error(ctx.Err())
@@ -136,28 +136,28 @@ func TestStorageEvictsSortedByRead(t *testing.T) {
 
 func TestStorageEvictsSortedByRead2(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
 		element.NewIndexed("3", 1),
 		element.NewIndexed("4", 0),
 	})
-	_, err := cache.Gets(context.Background(), []string{"1", "2", "3"})
+	_, err := cache.Gets(t.Context(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Gets(context.Background(), []string{"1", "2"})
+	_, err = cache.Gets(t.Context(), []string{"1", "2"})
 	if err != nil {
 		t.Error(err)
 	}
 
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("5", 0),
 		element.NewIndexed("6", 0),
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	r := cold.CollectDeleted(ctx, 5)
 	cancel()
 	if len(r) != 2 {
@@ -172,33 +172,33 @@ func TestStorageEvictsSortedByRead2(t *testing.T) {
 
 func TestStorageEvictsOldest(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
 		element.NewIndexed("3", 3),
 	})
-	_, err := cache.Gets(context.Background(), []string{"1", "2", "3"})
+	_, err := cache.Gets(t.Context(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Gets(context.Background(), []string{"1", "2", "3"})
+	_, err = cache.Gets(t.Context(), []string{"1", "2", "3"})
 	if err != nil {
 		t.Error(err)
 	}
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("5", 0),
 		element.NewIndexed("6", 0),
 	})
-	_, err = cache.Gets(context.Background(), []string{"5", "6"})
+	_, err = cache.Gets(t.Context(), []string{"5", "6"})
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Gets(context.Background(), []string{"5", "6"})
+	_, err = cache.Gets(t.Context(), []string{"5", "6"})
 	if err != nil {
 		t.Error(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 1)
 	cancel()
 	if len(r) != 1 {
@@ -213,8 +213,8 @@ func TestStorageEvictsOldest(t *testing.T) {
 
 func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 	cold := NewTestColdStorage[element.Indexed[int]]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 10)
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("1", 1),
 		element.NewIndexed("2", 2),
 		element.NewIndexed("3", 3),
@@ -226,10 +226,10 @@ func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 		element.NewIndexed("9", 9),
 		element.NewIndexed("10", 10),
 	})
-	cache.Set(context.Background(), []element.Indexed[int]{
+	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("11", 11),
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 3)
 	cancel()
 	if len(r) != 3 {
@@ -237,38 +237,48 @@ func TestStorageEvictsUntil20PercentUnderMax(t *testing.T) {
 	}
 }
 
-type TrashableIndexed struct {
-	element.Indexed[int]
-	canBeTrashed bool
-}
-
-func (u *TrashableIndexed) Index() string {
-	return u.Indexed.Index()
-}
-
-func (u *TrashableIndexed) CanBeTrashed() bool {
-	return u.canBeTrashed
-}
-
-func TestStorageDoesNotTrashUntrashable(t *testing.T) {
-	cold := NewTestColdStorage[*TrashableIndexed]()
-	cache := golfu.NewCachedStorage(context.Background(), cold, 4)
-	cache.Set(context.Background(), []*TrashableIndexed{
-		{Indexed: element.NewIndexed("1", 1), canBeTrashed: false},
-		{Indexed: element.NewIndexed("2", 2), canBeTrashed: false},
-		{Indexed: element.NewIndexed("3", 3), canBeTrashed: true},
-		{Indexed: element.NewIndexed("4", 4), canBeTrashed: false},
+func TestStorageDoesNotEvictUnevictable(t *testing.T) {
+	cold := NewTestColdStorage[*element.EvictableIndexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("1", 1, false),
+		element.NewEvictableIndexed("2", 1, false),
+		element.NewEvictableIndexed("3", 1, true),
+		element.NewEvictableIndexed("4", 1, false),
 	})
-	cache.Set(context.Background(), []*TrashableIndexed{
-		{Indexed: element.NewIndexed("5", 5), canBeTrashed: false},
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("5", 5, false),
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 1)
 	cancel()
 	if len(r) != 1 {
-		t.Errorf("Expected 1 trashed items got %d", len(r))
+		t.Errorf("Expected 1 evicted items got %d", len(r))
 	}
 	if r[0].Index() != "3" {
-		t.Errorf("Wrong item trashed expected 3 got %s", r[0].Index())
+		t.Errorf("Wrong item evicted expected 3 got %s", r[0].Index())
+	}
+}
+
+func TestStorageDoesCanEvictNewlyAddedUnevictable(t *testing.T) {
+	cold := NewTestColdStorage[*element.EvictableIndexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("1", 1, false),
+		element.NewEvictableIndexed("2", 1, false),
+		element.NewEvictableIndexed("3", 1, false),
+		element.NewEvictableIndexed("4", 1, false),
+	})
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("5", 5, true),
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+	r := cold.CollectDeleted(ctx, 1)
+	cancel()
+	if len(r) != 1 {
+		t.Errorf("Expected 1 evicted items got %d", len(r))
+	}
+	if r[0].Index() != "5" {
+		t.Errorf("Wrong item evicted expected 5 got %s", r[0].Index())
 	}
 }

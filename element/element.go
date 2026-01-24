@@ -9,17 +9,17 @@ type Indexed[T any] struct {
 	Value T
 }
 
-type TrashableIndexed[T any] struct {
+type EvictableIndexed[T any] struct {
 	Indexed[T]
-	canBeTrashed bool
+	canBeEvicted bool
 }
 
-func (t *TrashableIndexed[T]) CanBeTrashed() bool {
-	return t.canBeTrashed
+func (t *EvictableIndexed[T]) CanBeEvicted() bool {
+	return t.canBeEvicted
 }
 
-type Trashable interface {
-	CanBeTrashed() bool
+type Evictable interface {
+	CanBeEvicted() bool
 }
 
 func (i Indexed[T]) Index() string {
@@ -28,4 +28,11 @@ func (i Indexed[T]) Index() string {
 
 func NewIndexed[T any](index string, value T) Indexed[T] {
 	return Indexed[T]{index: index, Value: value}
+}
+
+func NewEvictableIndexed[T any](index string, value T, canBeEvicted bool) *EvictableIndexed[T] {
+	return &EvictableIndexed[T]{
+		Indexed:      Indexed[T]{index: index, Value: value},
+		canBeEvicted: canBeEvicted,
+	}
 }
