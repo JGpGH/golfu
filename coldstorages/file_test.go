@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/JGpGH/golfu/coldstorages"
-	"github.com/JGpGH/golfu/errors"
+	golfuerror "github.com/JGpGH/golfu/errors"
 )
 
 type testElement struct {
@@ -202,7 +202,7 @@ func TestFileStorage_Get_NotFound(t *testing.T) {
 
 	ctx := t.Context()
 	retrieved, err := fs.Get(ctx, "nonexistent")
-	if err != errors.ErrNotFound {
+	if err != golfuerror.ErrNotFound {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
 	if retrieved != nil {
@@ -285,7 +285,7 @@ func TestFileStorage_Gets_PartialResults(t *testing.T) {
 	// Request some existing and some non-existing
 	indexes := []string{"test1", "test2", "nonexistent"}
 	results, err := fs.Gets(ctx, indexes)
-	if err != errors.ErrNotFound {
+	if err != golfuerror.ErrNotFound {
 		t.Fatalf("expected not found err, got %v", err)
 	}
 
@@ -327,7 +327,7 @@ func TestFileStorage_Gets_AllNonexistent(t *testing.T) {
 	ctx := t.Context()
 	indexes := []string{"nonexistent1", "nonexistent2"}
 	results, err := fs.Gets(ctx, indexes)
-	if err != errors.ErrNotFound {
+	if err != golfuerror.ErrNotFound {
 		t.Fatalf("expected not found err, got %v", err)
 	}
 

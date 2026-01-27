@@ -15,7 +15,7 @@ func BenchmarkCachedStorageSet2(b *testing.B) {
 	cold := coldstorages.NewFileStorage[element.Indexed[int]](tempDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cache := golfu.NewCachedStorage[element.Indexed[int]](ctx, cold, 1000)
+	cache := golfu.NewCachedStorage(ctx, cold, 1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

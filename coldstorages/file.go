@@ -9,12 +9,12 @@ import (
 
 	"github.com/JGpGH/golfu/element"
 	"github.com/JGpGH/golfu/errors"
+	"github.com/JGpGH/golfu/lockmap"
 )
 
 type FileStorage[T element.Indexable] struct {
 	basePath string
-	lockMap  map[string]*resource
-	mu       sync.Mutex
+	lockMap  *lockmap.LockMap
 }
 
 type resource struct {
@@ -26,51 +26,7 @@ func NewFileStorage[T element.Indexable](basePath string) *FileStorage[T] {
 	os.MkdirAll(basePath, os.ModePerm)
 	return &FileStorage[T]{
 		basePath: basePath,
-		lockMap:  make(map[string]*resource),
-	}
-}
-
-func (fs *FileStorage[T]) rlock(index string) func() {
-	fs.mu.Lock()
-	res, exists := fs.lockMap[index]
-	if !exists {
-		fs.lockMap[index] = &resource{
-			refCount: 1,
-			lock:     &sync.RWMutex{},
-		}
-		res = fs.lockMap[index]
-	} else {
-		res.refCount++
-	}
-	res.lock.RLock()
-	fs.mu.Unlock()
-	return func() {
-		res.refCount--
-		if res.refCount == 0 {
-			fs.mu.Lock()
-			delete(fs.lockMap, index)
-			fs.mu.Unlock()
-		}
-		res.lock.RUnlock()
-	}
-}
-
-func (fs *FileStorage[T]) lock(index string) func() {
-	fs.mu.Lock()
-	res, exists := fs.lockMap[index]
-	if !exists {
-		res = &resource{
-			refCount: 1,
-			lock:     &sync.RWMutex{},
-		}
-		fs.lockMap[index] = res
-	}
-	fs.mu.Unlock()
-	res.lock.Lock()
-	return func() {
-		fs.mu.Lock()
-		delete(fs.lockMap, index)
-		fs.mu.Unlock()
+		lockMap:  lockmap.New(),
 	}
 }
 
@@ -80,7 +36,7 @@ func (fs *FileStorage[T]) path_from_index(index string) string {
 
 func (fs *FileStorage[T]) writeToFile(element T) error {
 	index := element.Index()
-	unlock := fs.lock(index)
+	unlock := fs.lockMap.Lock(index)
 	defer unlock()
 	if index == "" {
 		return errors.ErrInvalidIndex
@@ -96,7 +52,7 @@ func (fs *FileStorage[T]) writeToFile(element T) error {
 }
 
 func (fs *FileStorage[T]) read(index string, ref *T) error {
-	unlock := fs.rlock(index)
+	unlock := fs.lockMap.Rlock(index)
 	defer unlock()
 	if index == "" {
 		return errors.ErrInvalidIndex
@@ -138,7 +94,9 @@ func (fs *FileStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 
 	go func() {
 		var element T
+		unlock := fs.lockMap.Rlock(index)
 		err := fs.read(index, &element)
+		unlock()
 		if err == nil {
 			result <- &element
 			return
@@ -177,7 +135,7 @@ func (fs *FileStorage[T]) Gets(ctx context.Context, indexes []string) (map[strin
 
 func (fs *FileStorage[T]) Delete(ctx context.Context, indexes []string) error {
 	for _, index := range indexes {
-		unlock := fs.lock(index)
+		unlock := fs.lockMap.Lock(index)
 		path := fs.path_from_index(index)
 		removeErr := os.Remove(path)
 		unlock()
