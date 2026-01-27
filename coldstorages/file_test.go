@@ -285,8 +285,8 @@ func TestFileStorage_Gets_PartialResults(t *testing.T) {
 	// Request some existing and some non-existing
 	indexes := []string{"test1", "test2", "nonexistent"}
 	results, err := fs.Gets(ctx, indexes)
-	if err != nil {
-		t.Fatalf("Gets failed: %v", err)
+	if err != errors.ErrNotFound {
+		t.Fatalf("expected not found err, got %v", err)
 	}
 
 	if len(results) != 2 {
@@ -327,8 +327,8 @@ func TestFileStorage_Gets_AllNonexistent(t *testing.T) {
 	ctx := t.Context()
 	indexes := []string{"nonexistent1", "nonexistent2"}
 	results, err := fs.Gets(ctx, indexes)
-	if err != nil {
-		t.Fatalf("Gets failed: %v", err)
+	if err != errors.ErrNotFound {
+		t.Fatalf("expected not found err, got %v", err)
 	}
 
 	if len(results) != 0 {
@@ -344,15 +344,12 @@ func TestFileStorage_Gets_CancelledContext(t *testing.T) {
 	cancel() // Cancel immediately
 
 	indexes := []string{"test1"}
-	results, err := fs.Gets(ctx, indexes)
+	_, err := fs.Gets(ctx, indexes)
 	if err == nil {
 		t.Error("Expected error with cancelled context, got nil")
 	}
 	if err != context.Canceled {
 		t.Errorf("Expected context.Canceled, got %v", err)
-	}
-	if results != nil {
-		t.Errorf("Expected nil results, got %+v", results)
 	}
 }
 

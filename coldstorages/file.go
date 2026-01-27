@@ -5,21 +5,72 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"os"
+	"sync"
 
 	"github.com/JGpGH/golfu/element"
 	"github.com/JGpGH/golfu/errors"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 type FileStorage[T element.Indexable] struct {
 	basePath string
+	lockMap  map[string]*resource
+	mu       sync.Mutex
+}
+
+type resource struct {
+	refCount int
+	lock     *sync.RWMutex
 }
 
 func NewFileStorage[T element.Indexable](basePath string) *FileStorage[T] {
 	os.MkdirAll(basePath, os.ModePerm)
 	return &FileStorage[T]{
 		basePath: basePath,
+		lockMap:  make(map[string]*resource),
+	}
+}
+
+func (fs *FileStorage[T]) rlock(index string) func() {
+	fs.mu.Lock()
+	res, exists := fs.lockMap[index]
+	if !exists {
+		fs.lockMap[index] = &resource{
+			refCount: 1,
+			lock:     &sync.RWMutex{},
+		}
+		res = fs.lockMap[index]
+	} else {
+		res.refCount++
+	}
+	res.lock.RLock()
+	fs.mu.Unlock()
+	return func() {
+		res.refCount--
+		if res.refCount == 0 {
+			fs.mu.Lock()
+			delete(fs.lockMap, index)
+			fs.mu.Unlock()
+		}
+		res.lock.RUnlock()
+	}
+}
+
+func (fs *FileStorage[T]) lock(index string) func() {
+	fs.mu.Lock()
+	res, exists := fs.lockMap[index]
+	if !exists {
+		res = &resource{
+			refCount: 1,
+			lock:     &sync.RWMutex{},
+		}
+		fs.lockMap[index] = res
+	}
+	fs.mu.Unlock()
+	res.lock.Lock()
+	return func() {
+		fs.mu.Lock()
+		delete(fs.lockMap, index)
+		fs.mu.Unlock()
 	}
 }
 
@@ -29,6 +80,8 @@ func (fs *FileStorage[T]) path_from_index(index string) string {
 
 func (fs *FileStorage[T]) writeToFile(element T) error {
 	index := element.Index()
+	unlock := fs.lock(index)
+	defer unlock()
 	if index == "" {
 		return errors.ErrInvalidIndex
 	}
@@ -43,6 +96,8 @@ func (fs *FileStorage[T]) writeToFile(element T) error {
 }
 
 func (fs *FileStorage[T]) read(index string, ref *T) error {
+	unlock := fs.rlock(index)
+	defer unlock()
 	if index == "" {
 		return errors.ErrInvalidIndex
 	}
@@ -62,8 +117,6 @@ func (fs *FileStorage[T]) read(index string, ref *T) error {
 }
 
 func (fs *FileStorage[T]) Set(ctx context.Context, values []T) error {
-	ctx, span := otel.GetTracerProvider().Tracer("FileStorage").Start(ctx, "FileStorage.Set")
-	defer span.End()
 	for _, element := range values {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -80,45 +133,57 @@ func (fs *FileStorage[T]) OnEviction(ctx context.Context, values []T) error {
 }
 
 func (fs *FileStorage[T]) Get(ctx context.Context, index string) (*T, error) {
-	ctx, span := otel.GetTracerProvider().Tracer("FileStorage").Start(ctx, "FileStorage.Get")
-	defer span.End()
-	span.SetAttributes(attribute.String("index", index))
-	if ctx.Err() != nil {
-		span.RecordError(ctx.Err())
+	result := make(chan *T, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		var element T
+		err := fs.read(index, &element)
+		if err == nil {
+			result <- &element
+			return
+		}
+		if os.IsNotExist(err) {
+			err = errors.ErrNotFound
+		}
+		errChan <- err
+	}()
+
+	select {
+	case <-ctx.Done():
 		return nil, ctx.Err()
+	case err := <-errChan:
+		return nil, err
+	case res := <-result:
+		return res, nil
 	}
-	var element T
-	err := fs.read(index, &element)
-	if err == nil {
-		return &element, nil
-	}
-	if os.IsNotExist(err) {
-		err = errors.ErrNotFound
-	} else {
-		span.RecordError(err)
-	}
-	return nil, err
 }
 
 func (fs *FileStorage[T]) Gets(ctx context.Context, indexes []string) (map[string]T, error) {
-	ctx, span := otel.GetTracerProvider().Tracer("FileStorage").Start(ctx, "FileStorage.Gets")
-	defer span.End()
 	result := make(map[string]T)
 	var err error
 	for _, index := range indexes {
-		if ctx.Err() != nil {
-			span.RecordError(ctx.Err())
-			return nil, ctx.Err()
-		}
-		var element T
-		readerr := fs.read(index, &element)
-		if readerr == nil {
-			result[index] = element
-		} else if os.IsNotExist(readerr) {
+		res, geterr := fs.Get(ctx, index)
+		if geterr == nil {
+			result[index] = *res
+		} else if err != errors.ErrNotFound {
+			return result, geterr
 		} else {
-			span.RecordError(err)
-			return nil, err
+			err = geterr
 		}
 	}
-	return result, nil
+	return result, err
+}
+
+func (fs *FileStorage[T]) Delete(ctx context.Context, indexes []string) error {
+	for _, index := range indexes {
+		unlock := fs.lock(index)
+		path := fs.path_from_index(index)
+		removeErr := os.Remove(path)
+		unlock()
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return removeErr
+		}
+	}
+	return nil
 }

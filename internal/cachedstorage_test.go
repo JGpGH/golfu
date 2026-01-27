@@ -53,6 +53,10 @@ func (tcs *TestColdStorage[T]) OnEviction(ctx context.Context, values []T) error
 	return nil
 }
 
+func (tcs *TestColdStorage[T]) Delete(ctx context.Context, indexes []string) error {
+	return nil
+}
+
 func (tcs *TestColdStorage[T]) CollectSetted(ctx context.Context, max int) []T {
 	res := make([]T, 0)
 	for {
@@ -260,7 +264,7 @@ func TestStorageDoesNotEvictUnevictable(t *testing.T) {
 	}
 }
 
-func TestStorageDoesCanEvictNewlyAddedUnevictable(t *testing.T) {
+func TestStorageCanEvictNewlyAddedUnevictable(t *testing.T) {
 	cold := NewTestColdStorage[*element.EvictableIndexed[int]]()
 	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
 	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
@@ -281,4 +285,8 @@ func TestStorageDoesCanEvictNewlyAddedUnevictable(t *testing.T) {
 	if r[0].Index() != "5" {
 		t.Errorf("Wrong item evicted expected 5 got %s", r[0].Index())
 	}
+}
+
+func TestStorageDoesNotDeleteDeletableFalse(t *testing.T) {
+
 }

@@ -86,6 +86,14 @@ func (s *CachedStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 	return fromCold, nil
 }
 
+func (s *CachedStorage[T]) Delete(ctx context.Context, indexes []string) error {
+	if err := s.Cold.Delete(ctx, indexes); err != nil {
+		return err
+	}
+	s.InMemory.Remove(indexes)
+	return nil
+}
+
 func (s *CachedStorage[T]) evict(amount int) {
 	if amount <= 0 {
 		return

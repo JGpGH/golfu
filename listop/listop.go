@@ -40,18 +40,15 @@ func (l *IndexedList[T]) readWriteCount(e *list.Element) uint32 {
 	return l.indexed[e.Value.(T).Index()].ReadWriteCount.Load()
 }
 
-func (l *IndexedList[T]) Remove(indexes []string) int {
+func (l *IndexedList[T]) Remove(indexes []string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	count := 0
 	for _, index := range indexes {
 		if c, ok := l.indexed[index]; ok {
 			l.sorted.Remove(c.Element)
 			delete(l.indexed, index)
-			count++
 		}
 	}
-	return count
 }
 
 func (l *IndexedList[T]) Gets(indexes []string) map[string]T {
