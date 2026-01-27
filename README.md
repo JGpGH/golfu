@@ -10,7 +10,7 @@ definition of the cached storage and cold storage
 ### [element module](element)
 any Indexable is storable, any Evictable can be kept explicitely in memory
 ### [coldstorages module](coldstorages)
-file based implementation of a cold storage using gob
+file based implementation of a cold storage using gob for encoding
 
 ## notes
 Don't use in production. <br>

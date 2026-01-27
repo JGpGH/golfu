@@ -44,29 +44,3 @@ func NewEvictableIndexed[T any](index string, value T, canBeEvicted bool) *Evict
 	ei.canBeEvicted.Store(canBeEvicted)
 	return ei
 }
-
-type Deletable interface {
-	CanBeDeleted() bool
-}
-
-type DeletableIndexed[T any] struct {
-	Indexed[T]
-	canBeDeleted atomic.Bool
-}
-
-func NewDeletableIndexed[T any](index string, value T, canBeDeleted bool) *DeletableIndexed[T] {
-	di := &DeletableIndexed[T]{
-		Indexed[T]{index: index, Value: value},
-		atomic.Bool{},
-	}
-	di.canBeDeleted.Store(canBeDeleted)
-	return di
-}
-
-func (d *DeletableIndexed[T]) CanBeDeleted() bool {
-	return d.canBeDeleted.Load()
-}
-
-func (d *DeletableIndexed[T]) SetCanBeDeleted(value bool) {
-	d.canBeDeleted.Store(value)
-}
