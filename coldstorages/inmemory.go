@@ -2,10 +2,10 @@ package coldstorages
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/JGpGH/golfu/element"
+	lfuErr "github.com/JGpGH/golfu/errors"
 )
 
 // for tests
@@ -34,7 +34,7 @@ func (s *InMemoryStorage[T]) Get(ctx context.Context, index string) (*T, error) 
 	defer s.RUnlock()
 	value, exists := s.data[index]
 	if !exists {
-		return nil, fmt.Errorf("value not found for index: %s", index)
+		return nil, lfuErr.ErrNotFound
 	}
 	return &value, nil
 }
