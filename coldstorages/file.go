@@ -42,7 +42,7 @@ func (fs *FileStorage[T]) writeToFile(element T) error {
 		return errors.ErrInvalidIndex
 	}
 	path := fs.path_from_index(index)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
@@ -94,9 +94,7 @@ func (fs *FileStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 
 	go func() {
 		var element T
-		unlock := fs.lockMap.Rlock(index)
 		err := fs.read(index, &element)
-		unlock()
 		if err == nil {
 			result <- &element
 			return
