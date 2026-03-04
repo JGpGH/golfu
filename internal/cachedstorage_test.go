@@ -33,7 +33,9 @@ func (tcs *TestColdStorage[T]) Set(ctx context.Context, values []T) error {
 func (tcs *TestColdStorage[T]) Gets(ctx context.Context, indexes []string) (map[string]T, error) {
 	res := make(map[string]T)
 	for _, key := range indexes {
-		res[key] = tcs.inner[key]
+		if v, ok := tcs.inner[key]; ok {
+			res[key] = v
+		}
 	}
 	return res, nil
 }
@@ -288,5 +290,31 @@ func TestStorageCanEvictNewlyAddedUnevictable(t *testing.T) {
 }
 
 func TestStorageDoesNotDeleteDeletableFalse(t *testing.T) {
+	cold := NewTestColdStorage[*element.EvictableIndexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("1", 1, false),
+		element.NewEvictableIndexed("2", 2, false),
+		element.NewEvictableIndexed("3", 3, true),
+		element.NewEvictableIndexed("4", 4, false),
+	})
+	cache.Set(t.Context(), []*element.EvictableIndexed[int]{
+		element.NewEvictableIndexed("5", 5, false),
+	})
 
+	// wait for eviction to complete
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+	cold.CollectDeleted(ctx, 1)
+	cancel()
+
+	// unevictable items should still be in cache
+	res, err := cache.Gets(t.Context(), []string{"1", "2", "4", "5"})
+	if err != nil {
+		t.Errorf("Gets error: %v", err)
+	}
+	for _, idx := range []string{"1", "2", "4", "5"} {
+		if _, ok := res[idx]; !ok {
+			t.Errorf("item %s should not have been evicted but is missing", idx)
+		}
+	}
 }

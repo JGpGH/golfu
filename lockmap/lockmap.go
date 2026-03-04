@@ -6,6 +6,7 @@ import (
 
 type resource struct {
 	lock sync.RWMutex
+	refs int
 }
 
 type LockMap struct {
@@ -26,8 +27,26 @@ func (fs *LockMap) getOrCreate(index string) *resource {
 		res = &resource{}
 		fs.lockMap[index] = res
 	}
+	res.refs++
 	fs.mu.Unlock()
 	return res
+}
+
+func (fs *LockMap) release(index string) {
+	fs.mu.Lock()
+	res := fs.lockMap[index]
+	res.refs--
+	if res.refs == 0 {
+		delete(fs.lockMap, index)
+	}
+	fs.mu.Unlock()
+}
+
+func (fs *LockMap) Len() int {
+	fs.mu.Lock()
+	n := len(fs.lockMap)
+	fs.mu.Unlock()
+	return n
 }
 
 func (fs *LockMap) Rlock(index string) func() {
@@ -35,6 +54,7 @@ func (fs *LockMap) Rlock(index string) func() {
 	res.lock.RLock()
 	return func() {
 		res.lock.RUnlock()
+		fs.release(index)
 	}
 }
 
@@ -43,5 +63,6 @@ func (fs *LockMap) Lock(index string) func() {
 	res.lock.Lock()
 	return func() {
 		res.lock.Unlock()
+		fs.release(index)
 	}
 }

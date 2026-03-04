@@ -18,6 +18,7 @@ type CachedStorage[T element.Indexable] struct {
 }
 
 func (s *CachedStorage[T]) Start(ctx context.Context) {
+	batchSize := max(s.MaxUnits/20, 10)
 	// cache storing routine for non-blocking Set
 	go func() {
 		for {
@@ -25,7 +26,17 @@ func (s *CachedStorage[T]) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case in := <-s.ToCold:
-				s.Cold.Set(ctx, in)
+				batch := in
+				for range batchSize - 1 {
+					select {
+					case more := <-s.ToCold:
+						batch = append(batch, more...)
+					default:
+						goto drain
+					}
+				}
+			drain:
+				s.Cold.Set(ctx, batch)
 				currentLen := s.InMemory.Len()
 				if currentLen > s.MaxUnits {
 					s.evict(currentLen - s.MaxUnits + s.MaxUnits/5) // evict 20% of the cache + everything above max
@@ -77,8 +88,8 @@ func (s *CachedStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 	}
 
 	fromCold, err := s.Cold.Get(ctx, index)
-	if err != nil {
-		return nil, err
+	if err != nil || fromCold == nil {
+		return fromCold, err
 	}
 
 	s.InMemory.Set([]T{*fromCold})
@@ -121,7 +132,7 @@ func NewCachedStorage[T element.Indexable](ctx context.Context, cold storage.Col
 		Cold:        cold,
 		MaxUnits:    maxUnits,
 		Ctx:         ctx,
-		ToCold:      make(chan []T, maxUnits),
+		ToCold:      make(chan []T, max(maxUnits/20, 10)),
 		IsEvictable: isEvictable,
 	}
 

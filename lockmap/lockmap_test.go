@@ -382,6 +382,10 @@ func TestLockMap_Lock_Cleanup(t *testing.T) {
 		unlock()
 	}
 
+	if lm.Len() != 0 {
+		t.Errorf("Expected map to be empty after all locks released, got len %d", lm.Len())
+	}
+
 	// Should be able to acquire lock again without issues
 	unlock := lm.Lock("cleanup_test")
 	unlock()
@@ -394,6 +398,10 @@ func TestLockMap_Rlock_Cleanup(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		unlock := lm.Rlock("cleanup_test")
 		unlock()
+	}
+
+	if lm.Len() != 0 {
+		t.Errorf("Expected map to be empty after all rlocks released, got len %d", lm.Len())
 	}
 
 	// Should be able to acquire lock again without issues
@@ -421,6 +429,35 @@ func TestLockMap_SpecialCharactersInIndex(t *testing.T) {
 
 		unlock = lm.Rlock(index)
 		unlock()
+	}
+}
+
+func TestLockMap_CleanupAfterConcurrentUse(t *testing.T) {
+	lm := lockmap.New()
+
+	const numKeys = 20
+	const numGoroutines = 50
+	var wg sync.WaitGroup
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			key := string(rune('A' + id%numKeys))
+			if id%2 == 0 {
+				unlock := lm.Lock(key)
+				unlock()
+			} else {
+				unlock := lm.Rlock(key)
+				unlock()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	if lm.Len() != 0 {
+		t.Errorf("Expected map to be empty after all concurrent ops, got len %d", lm.Len())
 	}
 }
 
@@ -459,5 +496,9 @@ func TestLockMap_StressTest(t *testing.T) {
 		// Success
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stress test timed out")
+	}
+
+	if lm.Len() != 0 {
+		t.Errorf("Expected map to be empty after stress test, got len %d", lm.Len())
 	}
 }
