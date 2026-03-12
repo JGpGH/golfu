@@ -289,6 +289,83 @@ func TestStorageCanEvictNewlyAddedUnevictable(t *testing.T) {
 	}
 }
 
+func TestInvalidateRemovesFromCacheOnly(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cold.inner["1"] = element.NewIndexed("1", 1)
+	cold.inner["2"] = element.NewIndexed("2", 2)
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+	cache.Set(t.Context(), []element.Indexed[int]{
+		element.NewIndexed("1", 1),
+		element.NewIndexed("2", 2),
+	})
+
+	// Invalidate "1" — should remove from cache but not cold
+	cache.Invalidate([]string{"1"})
+
+	// "1" should still be fetchable (re-loaded from cold)
+	res, err := cache.Get(t.Context(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || res.Value != 1 {
+		t.Error("Expected to re-fetch '1' from cold storage after invalidation")
+	}
+
+	// "2" should still be a cache hit
+	res, err = cache.Get(t.Context(), "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || res.Value != 2 {
+		t.Error("'2' should still be in cache")
+	}
+}
+
+func TestInvalidateMultipleKeys(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cold.inner["1"] = element.NewIndexed("1", 1)
+	cold.inner["2"] = element.NewIndexed("2", 2)
+	cold.inner["3"] = element.NewIndexed("3", 3)
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+	cache.Set(t.Context(), []element.Indexed[int]{
+		element.NewIndexed("1", 1),
+		element.NewIndexed("2", 2),
+		element.NewIndexed("3", 3),
+	})
+
+	cache.Invalidate([]string{"1", "3"})
+
+	// Both should be re-fetchable from cold
+	res, err := cache.Gets(t.Context(), []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, idx := range []string{"1", "2", "3"} {
+		if _, ok := res[idx]; !ok {
+			t.Errorf("Expected key %s to be available after invalidation", idx)
+		}
+	}
+}
+
+func TestInvalidateNonExistentKeyIsNoop(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+	cache.Set(t.Context(), []element.Indexed[int]{
+		element.NewIndexed("1", 1),
+	})
+
+	// Should not panic or error
+	cache.Invalidate([]string{"nonexistent"})
+
+	res, err := cache.Get(t.Context(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || res.Value != 1 {
+		t.Error("'1' should still be in cache")
+	}
+}
+
 func TestStorageDoesNotDeleteDeletableFalse(t *testing.T) {
 	cold := NewTestColdStorage[*element.EvictableIndexed[int]]()
 	cache := golfu.NewCachedStorage(t.Context(), cold, 4)

@@ -4,13 +4,15 @@ In-memory cache system
 - prevent some resources to be removed from the cache by implementing [Evictable.CanBeEvicted](element/element.go) on the element
 - auto eviction by read count (LFU)
 - retrieves all cache-miss from the cold storage provided and sets new elements both in cold storage and cache
+- invalidate cache entries without deleting from cold storage
+- lock-free concurrent reads via left-right map
 ## Module tour
 ### [storage module](storage) 
 definition of the cached storage and cold storage
 ### [element module](element)
 any Indexable is storable, any Evictable can be kept explicitely in memory
 ### [coldstorages module](coldstorages)
-file based implementation of a cold storage using gob for encoding
+implementations of some cold storages
 
 ## notes
 Don't use in production. <br>
@@ -32,7 +34,7 @@ Given a version number MAJOR.MINOR.PATCH, increment the:
 `GOPROXY=proxy.golang.org go list -m github.com/JGpGH/golfu@vX.Y.Z`
 
 ## current version
-v0.8.5
+v0.9.0
 
 
      /\

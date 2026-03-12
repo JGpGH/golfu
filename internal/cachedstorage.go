@@ -15,10 +15,21 @@ type CachedStorage[T element.Indexable] struct {
 	MaxUnits    int
 	Ctx         context.Context
 	ToCold      chan []T
+	evictChan   chan struct{}
 }
 
 func (s *CachedStorage[T]) Start(ctx context.Context) {
 	batchSize := max(s.MaxUnits/20, 10)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _ = <-s.evictChan:
+				s.evict()
+			}
+		}
+	}()
 	// cache storing routine for non-blocking Set
 	go func() {
 		for {
@@ -36,11 +47,11 @@ func (s *CachedStorage[T]) Start(ctx context.Context) {
 					}
 				}
 			drain:
-				s.Cold.Set(ctx, batch)
 				currentLen := s.InMemory.Len()
 				if currentLen > s.MaxUnits {
-					s.evict(currentLen - s.MaxUnits + s.MaxUnits/5) // evict 20% of the cache + everything above max
+					s.evictChan <- struct{}{} // evict 20% of the cache + everything above max
 				}
+				s.Cold.Set(ctx, batch)
 			}
 		}
 	}()
@@ -97,6 +108,10 @@ func (s *CachedStorage[T]) Get(ctx context.Context, index string) (*T, error) {
 	return fromCold, nil
 }
 
+func (s *CachedStorage[T]) Invalidate(indexes []string) {
+	s.InMemory.Remove(indexes)
+}
+
 func (s *CachedStorage[T]) Delete(ctx context.Context, indexes []string) error {
 	if err := s.Cold.Delete(ctx, indexes); err != nil {
 		return err
@@ -105,7 +120,8 @@ func (s *CachedStorage[T]) Delete(ctx context.Context, indexes []string) error {
 	return nil
 }
 
-func (s *CachedStorage[T]) evict(amount int) {
+func (s *CachedStorage[T]) evict() {
+	amount := s.InMemory.Len() - s.MaxUnits + s.MaxUnits/5
 	if amount <= 0 {
 		return
 	}
@@ -119,7 +135,7 @@ func (s *CachedStorage[T]) evict(amount int) {
 		}, amount)
 		s.Cold.OnEviction(s.Ctx, evicted)
 	}
-	s.InMemory.ClearReadCounts()
+	s.InMemory.HalveReadCounts()
 }
 
 func NewCachedStorage[T element.Indexable](ctx context.Context, cold storage.ColdStorage[T], maxUnits int) *CachedStorage[T] {
@@ -133,6 +149,7 @@ func NewCachedStorage[T element.Indexable](ctx context.Context, cold storage.Col
 		MaxUnits:    maxUnits,
 		Ctx:         ctx,
 		ToCold:      make(chan []T, max(maxUnits/20, 10)),
+		evictChan:   make(chan struct{}, 5),
 		IsEvictable: isEvictable,
 	}
 
