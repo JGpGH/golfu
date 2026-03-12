@@ -188,21 +188,16 @@ func TestStorageEvictsOldest(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	_, err = cache.Gets(t.Context(), []string{"1", "2", "3"})
-	if err != nil {
-		t.Error(err)
-	}
 	cache.Set(t.Context(), []element.Indexed[int]{
 		element.NewIndexed("5", 0),
 		element.NewIndexed("6", 0),
 	})
-	_, err = cache.Gets(t.Context(), []string{"5", "6"})
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = cache.Gets(t.Context(), []string{"5", "6"})
-	if err != nil {
-		t.Error(err)
+	// Read "5","6" enough times to clearly outrank "1","2","3"
+	for range 3 {
+		_, err = cache.Gets(t.Context(), []string{"5", "6"})
+		if err != nil {
+			t.Error(err)
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	r := cold.CollectDeleted(ctx, 1)
@@ -363,6 +358,92 @@ func TestInvalidateNonExistentKeyIsNoop(t *testing.T) {
 	}
 	if res == nil || res.Value != 1 {
 		t.Error("'1' should still be in cache")
+	}
+}
+
+func TestHydratePopulatesCacheWithoutColdWrite(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+
+	cache.Hydrate([]element.Indexed[int]{
+		element.NewIndexed("1", 1),
+		element.NewIndexed("2", 2),
+	})
+
+	// Items should be in cache (no cold round-trip needed)
+	res, err := cache.Gets(t.Context(), []string{"1", "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["1"].Value != 1 || res["2"].Value != 2 {
+		t.Error("Hydrated items should be retrievable from cache")
+	}
+
+	// Cold storage should have nothing
+	select {
+	case item := <-cold.setted:
+		t.Errorf("Hydrate should not write to cold storage, got %v", item)
+	default:
+		// expected
+	}
+}
+
+func TestHydrateTriggersEviction(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 4)
+
+	// Fill cache to capacity via Hydrate
+	cache.Hydrate([]element.Indexed[int]{
+		element.NewIndexed("1", 1),
+		element.NewIndexed("2", 2),
+		element.NewIndexed("3", 3),
+		element.NewIndexed("4", 4),
+		element.NewIndexed("5", 5),
+	})
+
+	// Should trigger eviction since we exceeded MaxUnits
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+	r := cold.CollectDeleted(ctx, 1)
+	cancel()
+	if len(r) < 1 {
+		t.Error("Hydrate exceeding MaxUnits should trigger eviction")
+	}
+}
+
+func TestHydrateEmptySliceIsNoop(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+
+	cache.Hydrate([]element.Indexed[int]{})
+
+	res, err := cache.Gets(t.Context(), []string{"1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 0 {
+		t.Error("Empty hydrate should not populate cache")
+	}
+}
+
+func TestHydrateOverwritesExistingCacheEntry(t *testing.T) {
+	cold := NewTestColdStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(t.Context(), cold, 10)
+
+	cache.Hydrate([]element.Indexed[int]{
+		element.NewIndexed("1", 100),
+	})
+
+	// Hydrate again with updated value
+	cache.Hydrate([]element.Indexed[int]{
+		element.NewIndexed("1", 200),
+	})
+
+	res, err := cache.Get(t.Context(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || res.Value != 200 {
+		t.Errorf("Hydrate should overwrite existing entry, got %v", res)
 	}
 }
 

@@ -12,6 +12,7 @@ type CachedStorage[T element.Indexable] interface {
 	Gets(ctx context.Context, indexes []string) (map[string]T, error)
 	Delete(ctx context.Context, indexes []string) error
 	Invalidate(indexes []string)
+	Hydrate(items []T)
 }
 
 type ReadOnlyCachedStorage[T element.Indexable] interface {

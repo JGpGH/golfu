@@ -110,6 +110,36 @@ func BenchmarkCachedStorageGetsMixedHitMiss10(b *testing.B) {
 	}
 }
 
+func BenchmarkCachedStorageHydrate10(b *testing.B) {
+	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(b.Context(), cold, 1000)
+
+	items := make([]element.Indexed[int], 10)
+	for i := range 10 {
+		items[i] = element.NewIndexed(fmt.Sprintf("h%d", i), i)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Hydrate(items)
+	}
+}
+
+func BenchmarkCachedStorageHydrate100(b *testing.B) {
+	cold := coldstorages.NewInMemoryStorage[element.Indexed[int]]()
+	cache := golfu.NewCachedStorage(b.Context(), cold, 1000)
+
+	items := make([]element.Indexed[int], 100)
+	for i := range 100 {
+		items[i] = element.NewIndexed(fmt.Sprintf("h%d", i), i)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Hydrate(items)
+	}
+}
+
 // Parallel benchmark: 80% reads, 20% writes with Zipf-distributed key access.
 // Simulates a realistic hot-key workload where a small set of keys gets most traffic.
 func BenchmarkCachedStorageParallelMixed(b *testing.B) {

@@ -112,6 +112,13 @@ func (s *CachedStorage[T]) Invalidate(indexes []string) {
 	s.InMemory.Remove(indexes)
 }
 
+func (s *CachedStorage[T]) Hydrate(items []T) {
+	s.InMemory.Set(items)
+	if s.InMemory.Len() > s.MaxUnits {
+		s.evictChan <- struct{}{}
+	}
+}
+
 func (s *CachedStorage[T]) Delete(ctx context.Context, indexes []string) error {
 	if err := s.Cold.Delete(ctx, indexes); err != nil {
 		return err
