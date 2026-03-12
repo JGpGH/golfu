@@ -34,7 +34,7 @@ Given a version number MAJOR.MINOR.PATCH, increment the:
 `GOPROXY=proxy.golang.org go list -m github.com/JGpGH/golfu@vX.Y.Z`
 
 ## current version
-v0.9.0
+v0.10.0
 
 
      /\
